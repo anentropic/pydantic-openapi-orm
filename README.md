@@ -10,7 +10,8 @@ In this case we're taking the loosely-typed JSON/YAML of an api schema and loadi
 
 Basically it's just a nicer way of working with an api schema than the pile of dictionaries you get from parsing the JSON or YAML.
 
-### Usage
+### Usage
+
 
 ```python
 import yaml
