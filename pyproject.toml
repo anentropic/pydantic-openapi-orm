@@ -1,8 +1,11 @@
 [tool.poetry]
 name = "pydantic-openapi-orm"
 version = "0.1.0"
-description = ""
+description = "A set of Pydantic models which can be instantiated from an OpenAPI 3 spec."
 authors = ["Anentropic <ego@anentropic.com>"]
+packages = [
+    { include = "openapi_orm" }
+]
 
 [tool.poetry.dependencies]
 python = "^3.7"
