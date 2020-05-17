@@ -1,8 +1,8 @@
 from pathlib import Path
 
 import pytest
-import yaml
 
+from openapi_orm.loader import load_doc
 from openapi_orm.models import OpenAPI3Document
 
 
@@ -19,8 +19,13 @@ from openapi_orm.models import OpenAPI3Document
 )
 def example_schema(request):
     path = Path(__file__).parent / Path(f"fixtures/openapi3/{request.param}")
-    with open(path) as f:
-        yield yaml.load(f.read(), Loader=yaml.FullLoader)
+    yield load_doc(f"file://{path}")
+
+
+@pytest.fixture
+def petstore():
+    path = Path(__file__).parent / Path(f"fixtures/openapi3/petstore.yaml")
+    return OpenAPI3Document.parse_obj(load_doc(path))
 
 
 def test_openapi3_example_schemas(example_schema):
@@ -32,3 +37,16 @@ def test_openapi3_example_schemas(example_schema):
     doc = OpenAPI3Document.parse_obj(example_schema)
     serialized = doc.dict(by_alias=True, exclude_unset=True)
     assert serialized == example_schema
+
+
+def test_refs(petstore):
+    ref = (
+        petstore
+        .paths["/pets"]
+        .get
+        .responses["200"]
+        .content["application/json"]
+        .schema_
+    )
+    # has JsonRef resolved it for us?
+    assert ref.type_ == "array"
