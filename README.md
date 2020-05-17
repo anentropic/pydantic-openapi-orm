@@ -9,3 +9,19 @@ So... I'm using this quote to justify stretching the usual db-centric understand
 In this case we're taking the loosely-typed JSON/YAML of an api schema and loading it into a set of Pydantic models which validate the input against the type system defined by the OpenAPI 3 specification, and return an OO object heirarchy.
 
 Basically it's just a nicer way of working with an api schema than the pile of dictionaries you get from parsing the JSON or YAML.
+
+### Usage
+
+```python
+import yaml
+from openapi_orm.models import OpenAPI3Document
+
+
+with open("myapi.yaml") as f:
+    raw = yaml.load(f.read(), Loader=yaml.FullLoader)
+
+doc = OpenAPI3Document.parse_obj(raw)
+
+for path in doc.paths:
+    print(path.description)
+```
