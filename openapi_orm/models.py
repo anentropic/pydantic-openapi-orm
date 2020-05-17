@@ -374,12 +374,6 @@ class Parameter(Extensible, BaseModel):
 
     content: Optional[Dict[str, MediaType]]
 
-    # x-link-src: JSON-Reference (where to get value from)
-    # two options:
-    # - extract: get value from this field in result
-    # - reuse: use same value that was passed for this field in requestBody
-    # ...could determine automatically depending on $ref path target?
-
     @root_validator
     def check_required(cls, values):
         if values["in_"] is In.PATH:
@@ -431,8 +425,6 @@ class RequestBody(Extensible, BaseModel):
     description: Optional[str]
     content: Dict[str, MediaType]
     required: bool = False
-
-    # x-link-sources: Dict[JSON-Pointer, JSON-Reference]
 
 
 class Link(Extensible, BaseModel):
@@ -520,14 +512,6 @@ class PathItem(Extensible, BaseModel):
     head: Optional[Operation]
     patch: Optional[Operation]
     trace: Optional[Operation]
-
-    # x-section-id: matching `x-sections` on the OpenAPI3Document
-
-    # Apimatic instead adds top-level section (only) as a `tag` on the
-    # `Operation` objects
-
-    # an alternative might be to add leaf section as tags, then extend `Tag`
-    # object with section ids
 
 
 Paths = Dict[str, PathItem]
@@ -651,5 +635,3 @@ class OpenAPI3Document(Extensible, BaseModel):
     security: Optional[List[SecurityRequirement]]
     tags: Optional[List[Tag]]
     externalDocs: Optional[ExternalDocumentation]
-
-    # x-sections: nested sections with id, title and description
