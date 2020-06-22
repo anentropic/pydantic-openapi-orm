@@ -24,7 +24,13 @@ def example_schema(request):
 
 @pytest.fixture
 def petstore():
-    path = Path(__file__).parent / Path(f"fixtures/openapi3/petstore.yaml")
+    path = Path(__file__).parent / Path("fixtures/openapi3/petstore.yaml")
+    return OpenAPI3Document.parse_obj(load_doc(path))
+
+
+@pytest.fixture
+def extensions():
+    path = Path(__file__).parent / Path("fixtures/openapi3/extensions.yaml")
     return OpenAPI3Document.parse_obj(load_doc(path))
 
 
@@ -50,3 +56,26 @@ def test_refs(petstore):
     )
     # has JsonRef resolved it for us?
     assert ref.type_ == "array"
+
+
+def test_extensions(extensions):
+    # `Config.alias_generator` does not run for `extra` fields
+    ext = getattr(
+        extensions.paths["/pets/{petId}"].get, 'x-apigraph-backlinks'
+    )
+    assert ext == {
+        'default': {
+            'operations': {
+                'New Pet': {
+                    'operationRef': '#/pets/post',
+                    'response': '200',
+                },
+            },
+            'parameters': {
+                'petId': {
+                    'from': 'New Pet',
+                    'select': '$response.body#/id',
+                },
+            },
+        },
+    }
