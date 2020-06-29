@@ -1,14 +1,18 @@
 import abc
 import re
 from copy import deepcopy
+from functools import wraps
 from enum import Enum
 from types import ModuleType
 from typing import (
     Any,
     Dict,
     ForwardRef,
+    Iterable,
     List,
     Optional,
+    Tuple,
+    Type,
     Union,
 )
 
@@ -23,6 +27,7 @@ from pydantic import (
     root_validator,
     validator,
 )
+from pydantic.fields import UndefinedType
 from pydantic.main import ModelMetaclass
 
 # TODO: replace all Any with Optional[object] ?
@@ -56,42 +61,53 @@ def hyphenated(name: str) -> str:
     return name.replace("_", "-")
 
 
-_MODEL_NAMESPACES = {}
+class ORMModelPlaceholder:
+    pass
+
+
+Namespace = Dict[str, Any]
+
+NamespacesMap = Dict[ORMModelPlaceholder, Tuple[Iterable[Type], Namespace]]
+
+_MODEL_NAMESPACES: NamespacesMap = {}
+
+
+# oo-oo ah-ah
+# (because we need to deepcopy our cls namespaces when stashing them)
+UndefinedType.__copy__ = lambda self: self
+UndefinedType.__deepcopy__ = lambda self, memo: self
 
 
 class ORMModelMetaclass(ModelMetaclass):
+    """
+    We need to be able to construct a new 'stack' of models, with field
+    relationships via ForwardRef resolved to use any overriden models
+
+    So we do this hack - we stash the construction namespaces of the models
+    in this file and return instead a placeholder class.
+
+    When defining an extended model you can inherit from the placeholder, but
+    adding the `ExtendedModelMetaclass` below, and then call `install_models`
+    to generate your custom stack and add them to your own module.
+    """
     def __new__(mcs, name, bases, namespace, **kwargs):  # noqa C901
-        # stash the namespace so we can later construct a new class
+        # stash the namespace so we can later construct a new concrete class
         cls_namespace = {}
         for key, value in namespace.items():
             if key == "__annotations__":
                 # we need to preserve the ForwardRefs in their unresolved state
-                # (ModelMetaclass.__new__ has some code that resolves them)
+                # (multiple concrete models may be derived from stashed attrs)
                 cls_namespace[key] = deepcopy(value)
             else:
                 cls_namespace[key] = value
-        _MODEL_NAMESPACES[name] = (bases, cls_namespace)
-        # then return the model cls as normal
-        return super().__new__(mcs, name, bases, namespace, **kwargs)
 
-
-class ExtendedModelMetaclass(ModelMetaclass):
-    def __new__(mcs, name, _, namespace, **kwargs):  # noqa C901
-        """
-        NOTE: this has to run after all the base models are constructed
-        (we can assume that will be the case since you have to import
-        `base.ExtendedModelMetaclass` in order to extend a model)
-        """
-        # merge the base model namespace with the extended model namespace
-        # to make a single composite model (we're not doing OOP inheritance)
-        bases, cls_namespace = _MODEL_NAMESPACES[name]
-        assert ExtensibleModel in bases
-        new_annotations = namespace.pop("__annotations__", {})
-        cls_namespace.setdefault("__annotations__", {}).update(new_annotations)
-        cls_namespace.update(namespace)
-        return ModelMetaclass.__new__(
-            ModelMetaclass, name, bases, cls_namespace, **kwargs
+        placeholder = type(
+            name,
+            (ORMModelPlaceholder,) + bases,
+            {"__module__": mcs.__module__},
         )
+        _MODEL_NAMESPACES[placeholder] = (bases, cls_namespace)
+        return placeholder
 
 
 class BaseModel(PydanticBaseModel, abc.ABC):
@@ -220,7 +236,7 @@ class Schema(ExtensibleModel, metaclass=ORMModelMetaclass):
     default: Any
 
     nullable: bool = False
-    discriminator: Optional[Discriminator]
+    discriminator: ForwardRef("Optional[Discriminator]")
     externalDocs: ForwardRef("Optional[ExternalDocumentation]")
     example: Any
     deprecated: bool = False
@@ -276,7 +292,7 @@ class Example(ExtensibleModel, metaclass=ORMModelMetaclass):
 
 class Encoding(ExtensibleModel, metaclass=ORMModelMetaclass):
     contentType: Optional[str]
-    headers: Optional[Dict[str, Union[Reference, "Header"]]]
+    headers: ForwardRef("Optional[Dict[str, Union[Reference, Header]]]")
     style: Optional[str]
     explode: bool = False
     allowReserved: bool = False
@@ -570,25 +586,26 @@ class PathItem(ExtensibleModel, metaclass=ORMModelMetaclass):
     trace: ForwardRef("Optional[Operation]")
 
 
-class _BaseOAuthFlow(ExtensibleModel, metaclass=ORMModelMetaclass):
+class _BaseOAuthFlow(ExtensibleModel):
     refreshUrl: Optional[HttpUrl]
     scopes: Dict[str, str]
 
 
-class ImplicitOAuthFlow(_BaseOAuthFlow):
+# TODO: test the model inheritance still works here
+class ImplicitOAuthFlow(_BaseOAuthFlow, metaclass=ORMModelMetaclass):
     authorizationUrl: HttpUrl
 
 
-class AuthorizationCodeOAuthFlow(_BaseOAuthFlow):
+class AuthorizationCodeOAuthFlow(_BaseOAuthFlow, metaclass=ORMModelMetaclass):
     authorizationUrl: HttpUrl
     tokenUrl: HttpUrl
 
 
-class PasswordOAuthFlow(_BaseOAuthFlow):
+class PasswordOAuthFlow(_BaseOAuthFlow, metaclass=ORMModelMetaclass):
     tokenUrl: HttpUrl
 
 
-class ClientCredentialsOAuthFlow(_BaseOAuthFlow):
+class ClientCredentialsOAuthFlow(_BaseOAuthFlow, metaclass=ORMModelMetaclass):
     tokenUrl: HttpUrl
 
 
@@ -616,12 +633,12 @@ class Type_(str, Enum):
     OPENID_CONNECT = "openIdConnect"
 
 
-class _BaseSecurityScheme(ExtensibleModel, metaclass=ORMModelMetaclass):
+class _BaseSecurityScheme(ExtensibleModel):
     type_: Type_ = Field(..., alias="type")
     description: Optional[str]
 
 
-class APIKeySecurityScheme(_BaseSecurityScheme):
+class APIKeySecurityScheme(_BaseSecurityScheme, metaclass=ORMModelMetaclass):
     name: str
     in_: In
 
@@ -632,16 +649,16 @@ class APIKeySecurityScheme(_BaseSecurityScheme):
         return v
 
 
-class HTTPSecurityScheme(_BaseSecurityScheme):
+class HTTPSecurityScheme(_BaseSecurityScheme, metaclass=ORMModelMetaclass):
     scheme: str
     bearerFormat: Optional[str]
 
 
-class OAuth2SecurityScheme(_BaseSecurityScheme):
+class OAuth2SecurityScheme(_BaseSecurityScheme, metaclass=ORMModelMetaclass):
     flows: ForwardRef("OAuthFlows")
 
 
-class OpenIDConnectSecurityScheme(_BaseSecurityScheme):
+class OpenIDConnectSecurityScheme(_BaseSecurityScheme, metaclass=ORMModelMetaclass):
     openIdConnectUrl: HttpUrl
 
 
@@ -666,7 +683,7 @@ class Components(ExtensibleModel, metaclass=ORMModelMetaclass):
     parameters: ForwardRef("Optional[Dict[str, Union[Reference, Parameter]]]")
     examples: ForwardRef("Optional[Dict[str, Union[Reference, Example]]]")
     requestBodies: ForwardRef("Optional[Dict[str, Union[Reference, RequestBody]]]")
-    headers: Optional[Dict[str, Union[Reference, Header]]]
+    headers: ForwardRef("Optional[Dict[str, Union[Reference, Header]]]")
     securitySchemes: ForwardRef(f"Optional[Dict[str, Union[Reference, {SecurityScheme}]]]")
     links: ForwardRef("Optional[Dict[str, Union[Reference, Link]]]")
     callbacks: ForwardRef(f"Optional[Dict[str, Union[Reference, {Callback}]]]")
@@ -678,13 +695,31 @@ class Tag(ExtensibleModel, metaclass=ORMModelMetaclass):
     externalDocs: ForwardRef("Optional[ExternalDocumentation]")
 
 
-def default_servers() -> ForwardRef("List[Server]"):
+_DEPENDENT_FUNCTIONS = []
+
+
+def depends_on_refs(uninitialised_fallback):
     """
-    NOTE:
-    Assumes this was called after `OpenAPI3Document.update_forward_refs()`
+    Primarily intended for case when we have a `Field(default_factory=...)`
+    which needs to return an instance of an ORM Model, this will need to
+    resolve a forward ref, which in turn will rely upon `install_models`
+    having supplied the namespace containing a concretised model stack.
     """
-    Server_ = ForwardRef("Server")._evaluate(globals(), locals())
-    Server_.update_forward_refs()
+    def inner(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if decorated._namespace is None:
+                return uninitialised_fallback(*args, **kwargs)
+            return f(*args, **kwargs)
+        decorated._namespace = None
+        _DEPENDENT_FUNCTIONS.append(decorated)
+        return decorated
+    return inner
+
+
+@depends_on_refs(lambda: None)
+def default_servers():
+    Server_ = ForwardRef("Server")._evaluate(default_servers._namespace, None)
     return [Server_(url="/")]
 
 
@@ -707,42 +742,77 @@ class OpenAPI3Document(ExtensibleModel, metaclass=ORMModelMetaclass):
 
 
 _OPEN_API_MODELS = (
-    "Contact",
-    "License",
-    "Info",
-    "ServerVariable",
-    "Server",
-    "ExternalDocumentation",
-    "Discriminator",
-    "XMLObj",
-    "Reference",
-    "Schema",
-    "Example",
-    "Encoding",
-    "MediaType",
-    "Header",
-    "Parameter",
-    "RequestBody",
-    "Link",
-    "Response",
-    "Operation",
-    "PathItem",
-    "ImplicitOAuthFlow",
-    "AuthorizationCodeOAuthFlow",
-    "PasswordOAuthFlow",
-    "ClientCredentialsOAuthFlow",
-    "OAuthFlows",
-    "APIKeySecurityScheme",
-    "HTTPSecurityScheme",
-    "OAuth2SecurityScheme",
-    "OpenIDConnectSecurityScheme",
-    "Components",
-    "Tag",
-    "OpenAPI3Document",
+    Contact,
+    License,
+    Info,
+    ServerVariable,
+    Server,
+    ExternalDocumentation,
+    Discriminator,
+    XMLObj,
+    Reference,
+    Schema,
+    Example,
+    Encoding,
+    MediaType,
+    Header,
+    Parameter,
+    RequestBody,
+    Link,
+    Response,
+    Operation,
+    PathItem,
+    ImplicitOAuthFlow,
+    AuthorizationCodeOAuthFlow,
+    PasswordOAuthFlow,
+    ClientCredentialsOAuthFlow,
+    OAuthFlows,
+    APIKeySecurityScheme,
+    HTTPSecurityScheme,
+    OAuth2SecurityScheme,
+    OpenIDConnectSecurityScheme,
+    Components,
+    Tag,
+    OpenAPI3Document,
 )
 
 
-def install_modules(module: ModuleType, **overrides: ExtensibleModel):
+class InvalidModelExtension(Exception):
+    pass
+
+
+def get_placeholder_model(
+    extended_model: ORMModelPlaceholder
+) -> ORMModelPlaceholder:
+    def _find_placeholders(
+        bases_: Iterable[Type], found: List[Type]
+    ) -> List[ORMModelPlaceholder]:
+        for base in bases_:
+            if base in _OPEN_API_MODELS:
+                found.append(base)
+            _find_placeholders(base.__bases__, found)
+        return found
+
+    found = _find_placeholders(extended_model.__bases__, [])
+    if not found:
+        raise InvalidModelExtension(
+            f"Did not find any ORM Model in bases for {extended_model}."
+        )
+    if len(found) > 1:
+        raise InvalidModelExtension(
+            f"Multiple ORM Models ({len(found)}) found in bases for {extended_model}: {found}"
+        )
+    return found[0]
+
+
+def _recursive_update_forward_refs(model, namespace: Dict[str, Any]):
+    model.update_forward_refs(**namespace)
+    for base in model.__bases__:
+        if hasattr(base, "update_forward_refs"):
+            base.update_forward_refs(**namespace)
+
+
+def install_models(module: ModuleType, *overrides: ExtensibleModel):
     """
     Generate a 'stack' of OpenAPI ORM models under your own root module
     while supplying any overridden models to substitute into the stack.
@@ -753,24 +823,54 @@ def install_modules(module: ModuleType, **overrides: ExtensibleModel):
         if key not in _OPEN_API_MODELS
     }
 
-    for name, model in overrides.items():
-        if name not in _OPEN_API_MODELS:
-            raise ValueError(f"`{name}` is not an OpenAPI model name.")
-        namespace[name] = model
-
-    for name in _OPEN_API_MODELS:
-        if name in overrides:
-            continue
-        # generate a new verbatim copy of the base model
-        bases, cls_namespace = _MODEL_NAMESPACES[name]
+    def _gen_model(placeholder: ORMModelPlaceholder, name: str) -> BaseModel:
+        bases, cls_namespace = _MODEL_NAMESPACES[placeholder]
         cls_namespace['__module__'] = module.__name__
-        model = ModelMetaclass.__new__(ModelMetaclass, name, bases, cls_namespace)
+        # NOTE: this also potentially triggers some ForwardRef resolution
+        return ModelMetaclass.__new__(
+            ModelMetaclass, name, bases, cls_namespace
+        )
+
+    # generate concrete extended models
+    concrete_models = {}
+    extended_placeholders = set()
+    for extended_model in overrides:
+        placeholder = get_placeholder_model(extended_model)
+        if placeholder in extended_placeholders:
+            raise InvalidModelExtension(
+                f"Duplicate base ORM Model in overrides: {extended_model}"
+            )
+        if placeholder not in _OPEN_API_MODELS:
+            raise InvalidModelExtension(
+                f"Unrecognised base ORM Model in overrides: {placeholder}"
+            )
+        # TODO: validate that non-extensible models haven't been extended with
+        # extra fields
+        extended_placeholders.add(placeholder)
+
+        # TODO: Config inheritance?
+        name = placeholder.__name__
+        base_model = _gen_model(placeholder, f"Base{name}")
+        model = type(name, (extended_model, base_model), {})
         setattr(module, name, model)
         namespace[name] = model
+        concrete_models[placeholder] = model
+
+    # generate concrete cls for remaining models
+    for placeholder in _OPEN_API_MODELS:
+        if placeholder in extended_placeholders:
+            continue
+        name = placeholder.__name__
+        model = _gen_model(placeholder, name)
+        setattr(module, name, model)
+        namespace[name] = model
+        concrete_models[placeholder] = model
 
     # resolve the `ForwardRef`s against our overriden stack
-    for name in _OPEN_API_MODELS:
-        namespace[name].update_forward_refs(**namespace)
+    for placeholder in _OPEN_API_MODELS:
+        model = concrete_models[placeholder]
+        _recursive_update_forward_refs(model, namespace)
 
-    # TODO: test that Server model can be extended, possible complication
-    # due to default factory on OpenAPI3Document
+    # helping hack for functions which depend on forward refs
+    for func in _DEPENDENT_FUNCTIONS:
+        func._namespace = namespace

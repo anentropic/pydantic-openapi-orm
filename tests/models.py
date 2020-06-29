@@ -5,8 +5,8 @@ from pydantic import Field, root_validator
 
 from openapi_orm.base import (
     BaseModel,
-    ExtendedModelMetaclass,
-    install_modules,
+    Operation as BaseOperation,
+    install_models,
 )
 
 
@@ -73,8 +73,19 @@ class BacklinkChain(BaseModel):
     requestBodyParameters: Dict[str, BacklinkParameter] = Field(default_factory=dict)
 
 
-class Operation(metaclass=ExtendedModelMetaclass):
+class OperationBase(BaseOperation):
     backlinks: Dict[str, BacklinkChain] = Field({}, alias="x-apigraph-backlinks")
 
+    def method(self):
+        return 3
 
-install_modules(sys.modules[__name__], Operation=Operation)
+
+class Operation(OperationBase):
+    extra: int = 2
+
+    def method(self):
+        val = super().method()
+        return val + self.extra
+
+
+install_models(sys.modules[__name__], Operation)

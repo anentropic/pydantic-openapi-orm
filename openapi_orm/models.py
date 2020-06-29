@@ -1,6 +1,6 @@
 import sys
 
-from openapi_orm.base import install_modules
+from openapi_orm.base import install_models
 
 
-install_modules(sys.modules[__name__])
+install_models(sys.modules[__name__])
