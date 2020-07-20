@@ -740,6 +740,12 @@ class OpenAPI3Document(ExtensibleModel, metaclass=ORMModelMetaclass):
     tags: ForwardRef("Optional[List[Tag]]")
     externalDocs: ForwardRef("Optional[ExternalDocumentation]")
 
+    @validator("servers")
+    def check_servers(cls, v):
+        if not v:
+            return default_servers()
+        return v
+
 
 _OPEN_API_MODELS = (
     Contact,
@@ -848,7 +854,7 @@ def install_models(module: ModuleType, *overrides: ExtensibleModel):
         # extra fields
         extended_placeholders.add(placeholder)
 
-        # TODO: Config inheritance?
+        # TODO: each extended model should also be a (separate) placeholder?
         name = placeholder.__name__
         base_model = _gen_model(placeholder, f"Base{name}")
         model = type(name, (extended_model, base_model), {})

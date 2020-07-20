@@ -1,4 +1,4 @@
-.PHONY: pypi, tag, shell, typecheck, pytest, test
+.PHONY: pypi, tag, shell, typecheck, pytest, pytest-pdb, test
 
 pypi:
 	poetry publish --build
@@ -12,8 +12,10 @@ typecheck:
 	pytype openapi_orm
 
 pytest:
-	#  --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb
 	py.test -v -s tests/
+
+pytest-pdb:
+	py.test -v -s --pdb --pdbcls=IPython.terminal.debugger:TerminalPdb tests/
 
 test:
 	$(MAKE) typecheck

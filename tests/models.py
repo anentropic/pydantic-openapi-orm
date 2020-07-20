@@ -1,7 +1,8 @@
 import sys
-from typing import Dict, Optional
+from typing import Dict
 
-from pydantic import Field, root_validator
+from pydantic import Field, root_validator, validator
+from pydantic.main import ModelMetaclass
 
 from openapi_orm.base import (
     BaseModel,
@@ -10,82 +11,47 @@ from openapi_orm.base import (
 )
 
 
-class RedundantSpecifiers(Exception):
-    pass
-
-
-class MissingRequiredField(Exception):
-    pass
-
-
-class BacklinkOperation(BaseModel):
-    operationId: Optional[str]
-    operationRef: Optional[str]
-    response: Optional[str]
-    responseRef: Optional[str]
-
-    @root_validator
-    def check_field_groups(cls, values):
-        if values.get("responseRef"):
-            if any(values.get(key)
-                   for key in {"operationId", "operationRef", "response"}):
-                raise RedundantSpecifiers(
-                    "`responseRef` found: do not supply other specifiers."
-                )
-        elif values.get("operationId"):
-            if values.get("operationRef"):
-                raise RedundantSpecifiers(
-                    "`operationId` found: do not supply an `operationRef`."
-                )
-            if not values.get("response"):
-                raise MissingRequiredField(
-                    "`response` is required when `operationId` is specified."
-                )
-        elif values.get("operationRef"):
-            if values.get("operationId"):
-                raise RedundantSpecifiers(
-                    "`operationRef` found: do not supply an `operationId`."
-                )
-            if not values.get("response"):
-                raise MissingRequiredField(
-                    "`response` is required when `operationRef` is specified."
-                )
-        else:
-            raise MissingRequiredField(
-                "One of: `responseRef`, `operationId`+`response` or "
-                "`operationRef`+`response` is required."
-            )
-        return values
-
-
-class BacklinkParameter(BaseModel):
-    class Config(BaseModel.Config):
-        allow_population_by_field_name = True  # because `from` is a keyword
-
-    from_: str = Field(..., alias="from")
-    select: str
-
-
 class BacklinkChain(BaseModel):
-    operations: Dict[str, BacklinkOperation]
-    parameters: Dict[str, BacklinkParameter] = Field(default_factory=dict)
-    requestBody: Optional[BacklinkParameter]
-    requestBodyParameters: Dict[str, BacklinkParameter] = Field(default_factory=dict)
+    value: str
 
 
 class OperationBase(BaseOperation):
     backlinks: Dict[str, BacklinkChain] = Field({}, alias="x-apigraph-backlinks")
+    other: int = 3
 
     def method(self):
-        return 3
+        return self.other
+
+    @validator("other")
+    def check_other(cls, v):
+        assert v > 0
+        return v
+
+    @root_validator
+    def check_all_base(cls, values):
+        if "extra" in values and "other" in values:
+            assert values["extra"] > values["other"]
+        return values
 
 
 class Operation(OperationBase):
-    extra: int = 2
+    extra: int = 11
+    max_extra: int = 100
 
     def method(self):
         val = super().method()
         return val + self.extra
+
+    @validator("extra")
+    def check_extra(cls, v):
+        assert v > 10
+        return v
+
+    @root_validator
+    def check_all(cls, values):
+        if "extra" in values and "max_extra" in values:
+            assert values["extra"] <= values["max_extra"]
+        return values
 
 
 install_models(sys.modules[__name__], Operation)
