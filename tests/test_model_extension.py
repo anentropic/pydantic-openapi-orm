@@ -7,6 +7,9 @@ from .models import (
     Operation,
     Server,
 )
+from .secondary_models import (
+    OpenAPI3Document as ReExtendedOpenAPI3Document,
+)
 
 
 def test_basics():
@@ -109,7 +112,7 @@ def test_base_model_inherit_from_base_model():
     pass
 
 
-def test_extend_already_extended_model_method_inheritance():
+def test_extend_one_level_extended_model_method_inheritance():
     """
     See `extra` and `method` on `Operation` and `OperationBase` in tests.models
     (top model method does super+extra)
@@ -123,6 +126,21 @@ def test_extend_already_extended_model_method_inheritance():
     doc = OpenAPI3Document.parse_obj(yaml_doc)
     operation = doc.paths["/objects/{id}"].get
     assert operation.method() == 23
+
+
+def test_extend_two_levels_extended_model():
+    """
+    Can we extend a model that itself is an extended model from another module
+    """
+    yaml_doc = OpenAPIDocFactory()
+    doc = ReExtendedOpenAPI3Document.parse_obj(yaml_doc)
+    operation = doc.paths["/objects/{id}"].get
+    assert operation.method() == 27  # 14 + 13 (adding values from all supers)
+
+    # yaml_doc = OpenAPIDocFactory(**{"paths__/objects/{id}__get__extra": 20})
+    # doc = ReExtendedOpenAPI3Document.parse_obj(yaml_doc)
+    # operation = doc.paths["/objects/{id}"].get
+    # assert operation.method() == 23
 
 
 def test_install_models_exceptions():

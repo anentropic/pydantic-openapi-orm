@@ -78,6 +78,15 @@ UndefinedType.__copy__ = lambda self: self
 UndefinedType.__deepcopy__ = lambda self, memo: self
 
 
+def _deepcopy_namespace(namespace):
+    # we need to preserve the ForwardRefs in their unresolved state
+    # (multiple concrete models may be derived from stashed attrs)
+    return {
+        key: deepcopy(value) if key == "__annotations__" else value
+        for key, value in namespace.items()
+    }
+
+
 class ORMModelMetaclass(ModelMetaclass):
     """
     We need to be able to construct a new 'stack' of models, with field
@@ -92,15 +101,7 @@ class ORMModelMetaclass(ModelMetaclass):
     """
     def __new__(mcs, name, bases, namespace, **kwargs):  # noqa C901
         # stash the namespace so we can later construct a new concrete class
-        cls_namespace = {}
-        for key, value in namespace.items():
-            if key == "__annotations__":
-                # we need to preserve the ForwardRefs in their unresolved state
-                # (multiple concrete models may be derived from stashed attrs)
-                cls_namespace[key] = deepcopy(value)
-            else:
-                cls_namespace[key] = value
-
+        cls_namespace = _deepcopy_namespace(namespace)
         placeholder = type(
             name,
             (ORMModelPlaceholder,) + bases,
@@ -831,6 +832,9 @@ def install_models(module: ModuleType, *overrides: ExtensibleModel):
 
     def _gen_model(placeholder: ORMModelPlaceholder, name: str) -> BaseModel:
         bases, cls_namespace = _MODEL_NAMESPACES[placeholder]
+        # don't modify the stashed originals
+        cls_namespace = _deepcopy_namespace(cls_namespace)
+
         cls_namespace['__module__'] = module.__name__
         # NOTE: this also potentially triggers some ForwardRef resolution
         return ModelMetaclass.__new__(

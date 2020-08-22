@@ -2,7 +2,6 @@ import sys
 from typing import Dict
 
 from pydantic import Field, root_validator, validator
-from pydantic.main import ModelMetaclass
 
 from openapi_orm.base import (
     BaseModel,
